@@ -580,11 +580,32 @@
         grid-template-columns: 1fr auto;
       }
 
+      /* ChatGPT 的宿主样式可能重置原生 checkbox（appearance / opacity / position）。
+         这里显式恢复浏览器复选框，避免网页 UI 更新后两个设置开关消失。 */
       #${WIDGET_ID} .yy-cum-setting-toggle-line input[type="checkbox"] {
-        width: 16px;
-        height: 16px;
-        margin: 0;
-        cursor: pointer;
+        -webkit-appearance: checkbox !important;
+        appearance: auto !important;
+        display: inline-block !important;
+        position: static !important;
+        inset: auto !important;
+        width: 16px !important;
+        min-width: 16px !important;
+        max-width: 16px !important;
+        height: 16px !important;
+        min-height: 16px !important;
+        max-height: 16px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        transform: none !important;
+        clip: auto !important;
+        clip-path: none !important;
+        pointer-events: auto !important;
+        justify-self: end !important;
+        align-self: center !important;
+        cursor: pointer !important;
+        accent-color: auto !important;
       }
 
       #${WIDGET_ID} .yy-cum-setting-line select,

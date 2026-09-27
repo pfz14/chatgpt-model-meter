@@ -1,4 +1,4 @@
-# 模型 · 额度监测 for ChatGPT v0.8.6
+# 模型 · 额度监测 for ChatGPT v0.8.7
 
 > 非官方第三方扩展，跟 OpenAI 没有任何关系。
 > Unofficial third-party extension. Not affiliated with OpenAI.
@@ -125,6 +125,7 @@ POST /backend-api/f/conversation
 
 ## 版本记录
 
+- **v0.8.7**：修复 ChatGPT 新 UI 样式覆盖导致齿轮设置里的「显示模型路由 / 默认隐藏」复选框消失
 - **v0.8.6**：只看本窗口；生图子调用不再误判为降级；Debug 面板可以选中文字，新增「复制全部」；修复卡片压住侧栏边缘后位置卡死、不再跟随侧栏的问题
 - **v0.8.5**：新增 `MATCH?`；不同层级权威字段冲突时判 SUS；`≈` 证据不参与判定；修复 `-reviewer` 这类名字被误当成版本后缀；`5.6` 与 `5-6` 视为同一模型；补全 patch 解析；证据卡片显示接口
 - **v0.8.4**：全量抓取 model 字段并分类判定，新增 Raw Evidence 面板
