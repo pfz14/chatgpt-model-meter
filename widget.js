@@ -9,6 +9,8 @@
   const MESSAGE_REQUEST = 'YY_CODEX_USAGE_REQUEST';
   const WIDGET_ID = 'yy-codex-usage-meter';
   const SETTINGS_KEY = 'yyCodexUsageMeterSettings';
+  const SETTINGS_PANEL_WIDTH = 236; // keep in sync with .yy-cum-settings-panel CSS width
+  const VIEWPORT_EDGE_MARGIN = 8;
 
   const DEFAULT_SETTINGS = {
     fontFamily: 'system',
@@ -18,7 +20,11 @@
     cardOpacity: 92,
     showModelRoute: true,
     defaultHidden: false,
-    language: 'auto'
+    language: 'auto',
+    posMode: 'auto',
+    posX: null,
+    posY: null,
+    collapsed: false
   };
 
   const FONT_FAMILIES = {
@@ -34,6 +40,7 @@
       font: '字体', system: '系统无衬线', serif: '衬线', mono: '等宽', size: '字号',
       textColor: '文字颜色', cardColor: '卡片颜色', opacity: '透明度',
       followTheme: '跟随主题', reset: '恢复默认', settings: '显示设置',
+      collapse: '收纳', expand: '展开', resetPosition: '恢复自动跟随',
       usageTitle: 'Work / Codex 剩余额度', clickRefresh: '点击卡片立即刷新。',
       readError: '暂时读取不到额度', retry: '点击卡片重试。'
     },
@@ -42,6 +49,7 @@
       font: 'Font', system: 'System sans', serif: 'Serif', mono: 'Monospace', size: 'Font size',
       textColor: 'Text color', cardColor: 'Card color', opacity: 'Opacity',
       followTheme: 'Follow theme', reset: 'Reset', settings: 'Display settings',
+      collapse: 'Collapse', expand: 'Expand', resetPosition: 'Auto-follow sidebar',
       usageTitle: 'Work / Codex remaining quota', clickRefresh: 'Click the card to refresh.',
       readError: 'Unable to read quota right now', retry: 'Click the card to retry.'
     }
@@ -65,11 +73,22 @@
   let weeklyValue = null;
   let settingsPanel = null;
   let settingsButton = null;
+  let collapseButton = null;
   let autoHideCloseTimer = 0;
   const AUTO_HIDE_MARGIN = 5;
   let lastPointerX = null;
   let lastPointerY = null;
   let currentSettings = { ...DEFAULT_SETTINGS };
+
+  // Dragging state: suppressClick swallows the synthetic click that fires after a real drag.
+  let suppressClick = false;
+  let dragActive = false;
+  let dragMoved = false;
+  let dragPointerId = null;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let dragStartLeft = 0;
+  let dragStartTop = 0;
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -162,7 +181,9 @@
     widget.style.setProperty('--yy-font-family', fontFamily);
     widget.style.setProperty('--yy-font-size', `${fontSize}px`);
     widget.dataset.autoHide = currentSettings.defaultHidden ? 'true' : 'false';
+    widget.dataset.collapsed = currentSettings.collapsed ? 'true' : 'false';
     applyLanguage();
+    updatePanelSide();
 
     if (settingsPanel) syncSettingsControls();
   }
@@ -177,6 +198,13 @@
     if (settingsButton) {
       settingsButton.setAttribute('aria-label', t('settings'));
       settingsButton.title = t('settings');
+    }
+    if (collapseButton) {
+      const collapsed = Boolean(currentSettings.collapsed);
+      const label = collapsed ? t('expand') : t('collapse');
+      collapseButton.setAttribute('aria-label', label);
+      collapseButton.title = label;
+      collapseButton.setAttribute('aria-expanded', String(!collapsed));
     }
     render();
   }
@@ -216,6 +244,7 @@
       }
     } catch {}
     applySettings();
+    updatePosition();
   }
 
   function saveSettings() {
@@ -282,6 +311,7 @@
       </label>
 
       <div class="yy-cum-settings-actions">
+        <button type="button" data-action="reset-position" data-i18n="resetPosition"></button>
         <button type="button" data-action="theme-default" data-i18n="followTheme"></button>
         <button type="button" data-action="reset-all" data-i18n="reset"></button>
       </div>
@@ -347,6 +377,15 @@
       saveSettings();
     });
 
+    panel.querySelector('[data-action="reset-position"]').addEventListener('click', () => {
+      currentSettings.posMode = 'auto';
+      currentSettings.posX = null;
+      currentSettings.posY = null;
+      applySettings();
+      updatePosition();
+      saveSettings();
+    });
+
     panel.querySelector('[data-action="theme-default"]').addEventListener('click', () => {
       currentSettings.textColor = null;
       currentSettings.cardColor = null;
@@ -378,10 +417,10 @@
         position: fixed;
         top: 10px;
         left: 232px;
-        width: 304px;
+        width: 236px;
         box-sizing: border-box;
         z-index: 2147483000;
-        padding: 10px 12px 11px;
+        padding: 8px 10px;
         border: 1px solid rgba(0,0,0,.11);
         border-radius: 12px;
         background: var(--yy-card-bg);
@@ -393,8 +432,12 @@
         font-size: var(--yy-font-size);
         line-height: 1.15;
         user-select: none;
-        transition: left 120ms ease, width 140ms ease, padding 140ms ease,
+        transition: left 120ms ease, top 120ms ease, width 140ms ease, padding 140ms ease,
           opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+      }
+
+      #${WIDGET_ID}.yy-cum-dragging {
+        transition: none !important;
       }
 
       #${WIDGET_ID}[data-auto-hide="true"]:not(:hover):not(.yy-cum-settings-open):not(.yy-cum-hover-buffer) {
@@ -426,8 +469,29 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        min-height: 24px;
-        margin-bottom: 3px;
+        gap: 6px;
+        min-height: 22px;
+        margin-bottom: 2px;
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #${WIDGET_ID}.yy-cum-dragging .yy-cum-header {
+        cursor: grabbing;
+      }
+
+      #${WIDGET_ID} .yy-cum-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 1px;
+      }
+
+      #${WIDGET_ID} .yy-cum-collapse-button svg {
+        transition: transform 160ms ease;
+      }
+
+      #${WIDGET_ID}[data-collapsed="true"] .yy-cum-collapse-button svg {
+        transform: rotate(180deg);
       }
 
       #${WIDGET_ID} .yy-cum-title {
@@ -436,12 +500,14 @@
         opacity: .88;
       }
 
-      #${WIDGET_ID} .yy-cum-settings-button {
+      #${WIDGET_ID} .yy-cum-settings-button,
+      #${WIDGET_ID} .yy-cum-collapse-button {
         display: inline-grid;
         place-items: center;
-        width: 26px;
-        height: 26px;
-        margin: -3px -3px -3px 0;
+        flex: none;
+        width: 24px;
+        height: 24px;
+        margin: -2px -2px -2px 0;
         padding: 0;
         border: 0;
         border-radius: 7px;
@@ -453,23 +519,25 @@
       }
 
       #${WIDGET_ID} .yy-cum-settings-button:hover,
+      #${WIDGET_ID} .yy-cum-collapse-button:hover,
       #${WIDGET_ID} .yy-cum-settings-button[aria-expanded="true"] {
         background: rgba(127,127,127,.12);
         opacity: .98;
       }
 
-      #${WIDGET_ID} .yy-cum-settings-button svg {
-        width: 17px;
-        height: 17px;
+      #${WIDGET_ID} .yy-cum-settings-button svg,
+      #${WIDGET_ID} .yy-cum-collapse-button svg {
+        width: 16px;
+        height: 16px;
         display: block;
       }
 
       #${WIDGET_ID} .yy-cum-row {
         display: grid;
-        grid-template-columns: 26px minmax(98px, 1fr) 48px 84px;
+        grid-template-columns: 22px minmax(0, 1fr) 40px 74px;
         align-items: center;
-        gap: 8px;
-        height: 30px;
+        gap: 6px;
+        height: 24px;
         white-space: nowrap;
       }
 
@@ -524,7 +592,7 @@
         position: absolute;
         top: 0;
         left: calc(100% + 8px);
-        width: 304px;
+        width: 236px;
         box-sizing: border-box;
         padding: 12px;
         border: 1px solid rgba(0,0,0,.12);
@@ -547,6 +615,37 @@
         bottom: 0;
         width: 9px;
         pointer-events: auto;
+      }
+
+      /* 拖动到右边缘附近时，设置面板改从左侧弹出，命中桥接同步镜像。 */
+      #${WIDGET_ID}[data-panel-side="left"] .yy-cum-settings-panel {
+        left: auto;
+        right: calc(100% + 8px);
+      }
+
+      #${WIDGET_ID}[data-panel-side="left"] .yy-cum-settings-panel::before {
+        left: auto;
+        right: -9px;
+      }
+
+      /* 手动收纳：折叠成只剩标题条，隐藏额度行 / 模型路由区块 / 设置面板。 */
+      #${WIDGET_ID}[data-collapsed="true"] {
+        width: auto;
+        padding: 8px 10px;
+      }
+
+      #${WIDGET_ID}[data-collapsed="true"] .yy-cum-header {
+        min-height: 20px;
+        margin-bottom: 0;
+      }
+
+      #${WIDGET_ID}[data-collapsed="true"] > .yy-cum-row,
+      #${WIDGET_ID}[data-collapsed="true"] > .yy-mum-block {
+        display: none !important;
+      }
+
+      #${WIDGET_ID}[data-collapsed="true"]:not(.yy-cum-settings-open) > .yy-cum-settings-panel {
+        display: none !important;
       }
 
       #${WIDGET_ID}[data-theme="dark"] .yy-cum-settings-panel {
@@ -674,12 +773,19 @@
     header.className = 'yy-cum-header';
     header.innerHTML = `
       <span class="yy-cum-title">Work / Codex</span>
-      <button class="yy-cum-settings-button" type="button" aria-label="Display settings" aria-expanded="false" title="Display settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="3.15"></circle>
-          <path d="M10.32 5.26L10.49 2.98A9.15 9.15 0 0 1 13.51 2.98L13.68 5.26A6.95 6.95 0 0 1 15.58 6.04L17.31 4.55A9.15 9.15 0 0 1 19.45 6.69L17.96 8.42A6.95 6.95 0 0 1 18.74 10.32L21.02 10.49A9.15 9.15 0 0 1 21.02 13.51L18.74 13.68A6.95 6.95 0 0 1 17.96 15.58L19.45 17.31A9.15 9.15 0 0 1 17.31 19.45L15.58 17.96A6.95 6.95 0 0 1 13.68 18.74L13.51 21.02A9.15 9.15 0 0 1 10.49 21.02L10.32 18.74A6.95 6.95 0 0 1 8.42 17.96L6.69 19.45A9.15 9.15 0 0 1 4.55 17.31L6.04 15.58A6.95 6.95 0 0 1 5.26 13.68L2.98 13.51A9.15 9.15 0 0 1 2.98 10.49L5.26 10.32A6.95 6.95 0 0 1 6.04 8.42L4.55 6.69A9.15 9.15 0 0 1 6.69 4.55L8.42 6.04A6.95 6.95 0 0 1 10.32 5.26Z"></path>
-        </svg>
-      </button>
+      <span class="yy-cum-header-actions">
+        <button class="yy-cum-collapse-button" type="button" aria-label="Collapse" aria-expanded="true" title="Collapse">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 15l6-6 6 6"></path>
+          </svg>
+        </button>
+        <button class="yy-cum-settings-button" type="button" aria-label="Display settings" aria-expanded="false" title="Display settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.15"></circle>
+            <path d="M10.32 5.26L10.49 2.98A9.15 9.15 0 0 1 13.51 2.98L13.68 5.26A6.95 6.95 0 0 1 15.58 6.04L17.31 4.55A9.15 9.15 0 0 1 19.45 6.69L17.96 8.42A6.95 6.95 0 0 1 18.74 10.32L21.02 10.49A9.15 9.15 0 0 1 21.02 13.51L18.74 13.68A6.95 6.95 0 0 1 17.96 15.58L19.45 17.31A9.15 9.15 0 0 1 17.31 19.45L15.58 17.96A6.95 6.95 0 0 1 13.68 18.74L13.51 21.02A9.15 9.15 0 0 1 10.49 21.02L10.32 18.74A6.95 6.95 0 0 1 8.42 17.96L6.69 19.45A9.15 9.15 0 0 1 4.55 17.31L6.04 15.58A6.95 6.95 0 0 1 5.26 13.68L2.98 13.51A9.15 9.15 0 0 1 2.98 10.49L5.26 10.32A6.95 6.95 0 0 1 6.04 8.42L4.55 6.69A9.15 9.15 0 0 1 6.69 4.55L8.42 6.04A6.95 6.95 0 0 1 10.32 5.26Z"></path>
+          </svg>
+        </button>
+      </span>
     `;
     root.appendChild(header);
     root.appendChild(row('5h'));
@@ -688,6 +794,7 @@
     settingsPanel = buildSettingsPanel();
     root.appendChild(settingsPanel);
     settingsButton = header.querySelector('.yy-cum-settings-button');
+    collapseButton = header.querySelector('.yy-cum-collapse-button');
 
     settingsButton.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -695,14 +802,72 @@
       settingsPanel.hidden = !nextOpen;
       settingsButton.setAttribute('aria-expanded', String(nextOpen));
       root.classList.toggle('yy-cum-settings-open', nextOpen);
-      if (nextOpen) syncSettingsControls();
+      if (nextOpen) { syncSettingsControls(); updatePanelSide(); }
+    });
+
+    collapseButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      currentSettings.collapsed = !currentSettings.collapsed;
+      applySettings();
+      saveSettings();
     });
 
     root.addEventListener('click', (event) => {
-      if (event.target.closest('.yy-cum-settings-button, .yy-cum-settings-panel')) return;
+      if (suppressClick) { suppressClick = false; return; }
+      if (event.target.closest('.yy-cum-settings-button, .yy-cum-collapse-button, .yy-cum-settings-panel')) return;
       root.classList.add('yy-cum-loading');
       requestUsage(true);
     });
+
+    // Header drag: move the fixed card with the pointer, clamped fully inside the viewport.
+    const DRAG_START_THRESHOLD = 3;
+
+    header.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (event.target.closest('.yy-cum-settings-button, .yy-cum-collapse-button, .yy-cum-settings-panel')) return;
+      dragActive = true;
+      dragMoved = false;
+      dragPointerId = event.pointerId;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      const rect = root.getBoundingClientRect();
+      dragStartLeft = rect.left;
+      dragStartTop = rect.top;
+      try { header.setPointerCapture(event.pointerId); } catch {}
+    });
+
+    header.addEventListener('pointermove', (event) => {
+      if (!dragActive || event.pointerId !== dragPointerId) return;
+      const dx = event.clientX - dragStartX;
+      const dy = event.clientY - dragStartY;
+      if (!dragMoved && Math.abs(dx) < DRAG_START_THRESHOLD && Math.abs(dy) < DRAG_START_THRESHOLD) return;
+      dragMoved = true;
+      root.classList.add('yy-cum-dragging');
+      const pos = clampPosition(dragStartLeft + dx, dragStartTop + dy);
+      root.style.left = `${pos.left}px`;
+      root.style.top = `${pos.top}px`;
+    });
+
+    const endHeaderDrag = (event) => {
+      if (!dragActive || (event && event.pointerId !== dragPointerId)) return;
+      dragActive = false;
+      try { header.releasePointerCapture(dragPointerId); } catch {}
+      dragPointerId = null;
+      root.classList.remove('yy-cum-dragging');
+      if (!dragMoved) return;
+      // Swallow the synthetic click that follows a real drag so it doesn't trigger a refresh.
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 0);
+      const rect = root.getBoundingClientRect();
+      currentSettings.posMode = 'manual';
+      currentSettings.posX = Math.round(rect.left);
+      currentSettings.posY = Math.round(rect.top);
+      saveSettings();
+      updatePosition();
+    };
+
+    header.addEventListener('pointerup', endHeaderDrag);
+    header.addEventListener('pointercancel', endHeaderDrag);
 
     const cancelAutoHideClose = () => {
       if (!autoHideCloseTimer) return;
@@ -953,19 +1118,53 @@
 
   let sidebarMissCount = 0;
 
-  function updatePosition() {
+  function clampPosition(left, top) {
+    const w = widget ? widget.offsetWidth : 0;
+    const h = widget ? widget.offsetHeight : 0;
+    const maxLeft = Math.max(VIEWPORT_EDGE_MARGIN, window.innerWidth - w - VIEWPORT_EDGE_MARGIN);
+    const maxTop = Math.max(VIEWPORT_EDGE_MARGIN, window.innerHeight - h - VIEWPORT_EDGE_MARGIN);
+    return {
+      left: Math.round(clamp(left, VIEWPORT_EDGE_MARGIN, maxLeft)),
+      top: Math.round(clamp(top, VIEWPORT_EDGE_MARGIN, maxTop))
+    };
+  }
+
+  function updatePanelSide() {
     if (!widget) return;
+    const rect = widget.getBoundingClientRect();
+    const need = SETTINGS_PANEL_WIDTH + 16;
+    const spaceRight = window.innerWidth - rect.right;
+    const spaceLeft = rect.left;
+    widget.dataset.panelSide = (spaceRight < need && spaceLeft > spaceRight) ? 'left' : 'right';
+  }
+
+  function updatePosition() {
+    if (!widget || dragActive) return;
+
+    if (currentSettings.posMode === 'manual') {
+      const storedLeft = Number.isFinite(Number(currentSettings.posX)) ? Number(currentSettings.posX) : VIEWPORT_EDGE_MARGIN;
+      const storedTop = Number.isFinite(Number(currentSettings.posY)) ? Number(currentSettings.posY) : 10;
+      const pos = clampPosition(storedLeft, storedTop);
+      widget.style.left = `${pos.left}px`;
+      widget.style.top = `${pos.top}px`;
+      updatePanelSide();
+      return;
+    }
+
     const sidebarRight = getSidebarRight();
     // DOM 瞬时变化导致侧栏测量失败时，先保持当前位置，不要跳回页面最左侧。
     // 但连续几次都测不到（窄窗口下侧栏整个消失），说明侧栏真的不在了，贴回左边。
     if (!(sidebarRight > 0)) {
       sidebarMissCount += 1;
       if (sidebarMissCount >= 3) widget.style.left = '12px';
+      updatePanelSide();
       return;
     }
     sidebarMissCount = 0;
     const left = Math.round(sidebarRight + 12);
     widget.style.left = `${left}px`;
+    widget.style.removeProperty('top');
+    updatePanelSide();
   }
 
   function requestUsage(force = false) {

@@ -421,9 +421,9 @@
     const style = el('style');
     style.id = 'yy-mum-style';
     style.textContent = `
-      #${HOST_ID} .yy-mum-block { margin-top: 6px; padding-top: 7px; border-top: 1px solid color-mix(in srgb, currentColor 13%, transparent); }
+      #${HOST_ID} .yy-mum-block { margin-top: 4px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, currentColor 13%, transparent); }
       @supports not (background: color-mix(in srgb, black 10%, transparent)) { #${HOST_ID} .yy-mum-block { border-top-color: rgba(127,127,127,.2); } }
-      #${HOST_ID} .yy-mum-rows { display: grid; grid-template-columns: 26px minmax(0,1fr) auto auto auto; align-items: center; gap: 1px 7px; line-height: 1.55; cursor: pointer; }
+      #${HOST_ID} .yy-mum-rows { display: grid; grid-template-columns: 24px minmax(0,1fr) auto auto auto; align-items: center; gap: 1px 6px; line-height: 1.4; cursor: pointer; }
       #${HOST_ID} .yy-mum-key { font-weight: 700; letter-spacing: .02em; opacity: .82; }
       #${HOST_ID} .yy-mum-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
       #${HOST_ID} .yy-mum-reqval { opacity: .72; }
